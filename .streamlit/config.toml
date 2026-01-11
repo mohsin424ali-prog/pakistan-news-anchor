@@ -10,5 +10,3 @@ backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#F8F9FA"
 textColor = "#212529"
 
-[ui]
-hideSidebarNav = false
