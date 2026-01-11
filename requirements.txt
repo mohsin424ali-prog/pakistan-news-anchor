@@ -5,7 +5,7 @@ feedparser>=6.0.11
 beautifulsoup4==4.12.3
 newspaper3k==0.2.8
 python-magic==0.4.27
-lxml>=4.9.0  # Use compatible version with pre-compiled wheels
+lxml[html_clean]>=4.9.0  # Include html_clean submodule for newspaper3k compatibility
 html5lib==1.1
 
 # News processing and content handling
@@ -13,6 +13,7 @@ newsapi-python==0.2.7
 langdetect==1.0.9
 num2words==0.5.13
 validators==0.22.0
+lxml_html_clean>=0.1.0
 
 # Text-to-speech and audio processing
 edge-tts==6.1.3
