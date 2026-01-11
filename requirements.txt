@@ -1,7 +1,7 @@
 # Core requirements - Streamlit and web framework
 streamlit==1.32.2
 requests==2.31.0
-feedparser==6.0.10
+feedparser>=6.0.11
 beautifulsoup4==4.12.3
 newspaper3k==0.2.8
 python-magic==0.4.27
