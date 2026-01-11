@@ -1,5 +1,5 @@
 # Use the same Python version as Hugging Face auto-created
-FROM python:3.13.5-slim
+FROM python:3.11.9-slim
 
 # Install system dependencies required by Python packages
 RUN apt-get update && apt-get install -y \
