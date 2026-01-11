@@ -5,7 +5,7 @@ feedparser==6.0.10
 beautifulsoup4==4.12.3
 newspaper3k==0.2.8
 python-magic==0.4.27
-lxml==5.1.0
+lxml>=4.9.0  # Use compatible version with pre-compiled wheels
 html5lib==1.1
 
 # News processing and content handling
