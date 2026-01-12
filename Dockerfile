@@ -37,8 +37,22 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+# Copy application code (exclude src directory since we run from root)
+COPY app.py ./
+COPY ui.py ./
+COPY config.py ./
+COPY english_news.py ./
+COPY urdu_news.py ./
+COPY video.py ./
+COPY tts.py ./
+COPY cache_manager.py ./
+COPY async_processor.py ./
+COPY utils.py ./
+COPY news_utils.py ./
+COPY download_model.py ./
+COPY create_placeholders.py ./
+COPY check_assets.py ./
+COPY cleanup.py ./
 
 # Create necessary directories
 RUN mkdir -p temp outputs cache
