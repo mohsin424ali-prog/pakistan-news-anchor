@@ -1,4 +1,10 @@
 import streamlit as st
+import sys
+import os
+
+# Add current directory to Python path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from ui import setup_ui, display_category_section, display_article_card, display_urdu_article_card
 from english_news import process_english_news
 from urdu_news import process_urdu_news
