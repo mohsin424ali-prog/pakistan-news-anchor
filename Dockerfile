@@ -27,8 +27,9 @@ RUN apt-get update && apt-get install -y \
     # Clean up apt cache to reduce image size
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
+# Set working directory and Python path
 WORKDIR /app
+ENV PYTHONPATH=/app
 
 # Copy requirements first for better caching
 COPY requirements.txt .
