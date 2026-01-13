@@ -2,8 +2,20 @@ import streamlit as st
 import sys
 import os
 
+# Debug: Print environment info
+print("Python version:", sys.version)
+print("Python path:", sys.path)
+print("Current directory:", os.getcwd())
+print("Files in current directory:", [f for f in os.listdir('.') if f.endswith('.py')])
+
 # Add current directory to Python path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+print("Added to path:", current_dir)
+
+# Debug: Check if utils can be found
+utils_path = os.path.join(current_dir, 'utils.py')
+print("Utils path exists:", os.path.exists(utils_path))
 
 from ui import setup_ui, display_category_section, display_article_card, display_urdu_article_card
 from english_news import process_english_news
@@ -119,86 +131,69 @@ def main():
                     )
                     selected_article = articles[selected_article_idx]
 
-                with col2:
-                    # Audio generation
-                    col_a1, col_a2 = st.columns(2)
-                    with col_a1:
-                        audio_btn = st.button("🎙️ Generate Audio", type="primary", use_container_width=True)
-
-                    with col_a2:
-                        if st.button("📋 View Script", type="secondary", use_container_width=True):
-                            st.text_area("News Script", selected_article['tts_text'], height=150)
-
-                    if audio_btn:
-                        with st.spinner("Generating audio..."):
-                            try:
-                                task_id = asyncio.run(generate_audio(
-                                    selected_article['tts_text'],
-                                    "Male",
-                                    lang_code
-                                ))
-
-                                if task_id:
-                                    st.success(f"Audio generation started! Task ID: {task_id}")
-                                    st.session_state.current_audio_task = task_id
-                                else:
-                                    st.error("Failed to start audio generation")
-                            except Exception as e:
-                                st.error(f"Audio generation failed: {str(e)}")
-
-                    # Audio result display
-                    if hasattr(st.session_state, 'current_audio_task'):
-                        task_id = st.session_state.current_audio_task
-                        status = async_processor.get_task_status(task_id)
-
-                        if status['status'] == 'completed':
-                            audio_path = status.get('result', {}).get('result')
-                            if audio_path and os.path.exists(audio_path):
-                                st.audio(audio_path)
-                                st.success("Audio generated successfully!")
-                            else:
-                                st.warning("Audio task completed but file not found")
-                        elif status['status'] == 'failed':
-                            st.error(f"Audio generation failed: {status.get('result', {}).get('error')}")
-                        else:
-                            st.info(f"Audio generation in progress... ({status['status']})")
-
-                    st.divider()
-
+                
                     # Video generation
-                    if st.button("🎥 Generate Video", type="secondary", use_container_width=True):
-                        # Check if model exists, download if necessary
-                        if not os.path.exists("Wav2Lip/checkpoints/wav2lip_gan.pth"):
-                            with st.spinner("Downloading Wav2Lip model... This may take several minutes"):
-                                if not ensure_wav2lip_model():
-                                    st.error("Failed to download required model. Please try again later.")
+                    if st.button("🎥 Generate Video", type="primary", use_container_width=True):
+                        with st.spinner("Generating video with audio... This may take several minutes"):
+                            try:
+                                # Check if model exists, download if necessary
+                                if not os.path.exists("Wav2Lip/checkpoints/wav2lip_gan.pth"):
+                                    st.info("Downloading Wav2Lip model... This may take several minutes")
+                                    if not ensure_wav2lip_model():
+                                        st.error("Failed to download required model. Please try again later.")
+                                        st.stop()
+
+                                # Validate other requirements
+                                if not validate_video_requirements():
+                                    st.error("Please check video requirements in the sidebar")
                                     st.stop()
 
-                        # Validate other requirements
-                        if not validate_video_requirements():
-                            st.error("Please check video requirements in the sidebar")
-                        else:
-                            audio_path = None
-                            if hasattr(st.session_state, 'current_audio_task'):
-                                task_status = async_processor.get_task_status(st.session_state.current_audio_task)
-                                if task_status['status'] == 'completed':
-                                    audio_path = task_status.get('result', {}).get('result')
+                                # Step 1: Generate audio first
+                                audio_path = None
+                                with st.spinner("Step 1/2: Generating audio..."):
+                                    task_id = asyncio.run(generate_audio(
+                                        selected_article['tts_text'],
+                                        "Male",
+                                        lang_code
+                                    ))
 
-                            if not audio_path:
-                                st.warning("Please generate audio first")
-                            else:
-                                with st.spinner("Generating video... This may take a few minutes"):
-                                    try:
+                                    if task_id:
+                                        st.session_state.current_audio_task = task_id
+                                        # Wait for audio generation to complete
+                                        import time
+                                        while True:
+                                            status = async_processor.get_task_status(task_id)
+                                            if status['status'] == 'completed':
+                                                audio_path = status.get('result', {}).get('result')
+                                                if audio_path and os.path.exists(audio_path):
+                                                    st.success("✅ Audio generated successfully!")
+                                                break
+                                            elif status['status'] == 'failed':
+                                                st.error(f"Audio generation failed: {status.get('result', {}).get('error')}")
+                                                st.stop()
+                                            else:
+                                                st.info("Audio generation in progress...")
+                                                time.sleep(2)
+                                    else:
+                                        st.error("Failed to start audio generation")
+                                        st.stop()
+
+                                # Step 2: Generate video
+                                if audio_path:
+                                    with st.spinner("Step 2/2: Generating video..."):
                                         avatar_input = Config().AUTO_AVATARS.get(lang_code) if auto_avatar else custom_avatar
                                         video_path = generate_video(audio_path, avatar_input, lang_code, auto_avatar)
 
                                         if video_path:
-                                            st.success("Video generated successfully!")
+                                            st.success("🎉 Video generated successfully!")
                                             st.video(video_path)
                                         else:
                                             st.error("Failed to generate video")
-                                    except Exception as e:
-                                        st.error(f"Video generation failed: {str(e)}")
+                                else:
+                                    st.error("Audio generation failed, cannot proceed with video generation")
+
+                            except Exception as e:
+                                st.error(f"Video generation failed: {str(e)}")
 
         else:
             st.info(f"📭 No {language} news available for {category} at this time. Try selecting a different category or language.")
