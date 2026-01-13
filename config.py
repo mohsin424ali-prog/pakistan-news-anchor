@@ -23,13 +23,18 @@ class Config:
     MAX_DESCRIPTION_LENGTH = 300
     VALID_CATEGORIES = ['general', 'business', 'sports', 'technology']
     MAX_ARTICLES_PER_CATEGORY = 5
-    MIN_ARTICLE_LENGTH = 100
+    
+    # BEST SOLUTION UPDATE: Lowered from 100 to 30 to accept short RSS snippets
+    MIN_ARTICLE_LENGTH = 30
+    
     CATEGORY_PRIORITY = ['general', 'business', 'sports', 'technology']
     ARTICLE_AGE_LIMIT = 48
     MAX_FEED_ENTRIES = 5
     VIDEO_TIMEOUT = 60
     MAX_RETRY_ATTEMPTS = 3
-    REQUEST_TIMEOUT = 15
+    
+    # BEST SOLUTION UPDATE: Increased timeout slightly for stability
+    REQUEST_TIMEOUT = 20
 
     # ========================
     # Text Constraints
@@ -55,6 +60,11 @@ class Config:
     SUMMARIZATION_API = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
     HUGGINGFACE_API_KEY = os.environ.get('HUGGINGFACE_API_KEY')
     MAX_CONCURRENT_REQUESTS = 5
+
+    # BEST SOLUTION UPDATE: Added headers to prevent blocking by news sites
+    REQUEST_HEADERS = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
 
     # ========================
     # TTS Configuration
@@ -141,8 +151,10 @@ class Config:
     # ========================
     # Content Processing
     # ========================
+    # BEST SOLUTION UPDATE: Empty list for 'general' to accept ALL news from the valid feeds.
+    # Strict keywords often filter out real breaking news that doesn't mention the city name.
     CATEGORY_KEYWORDS = {
-        'general': ['pakistan', 'national', 'islamabad', 'punjab', 'sindh', 'kpk', 'balochistan'],
+        'general': [], 
         'business': ['economy', 'rupee', 'PSX', 'SBP', 'investment', 'trade', 'CPEC'],
         'sports': ['cricket', 'Pakistan Cricket Board', 'PCB', 'PSL', 'pak vs'],
         'technology': ['5G', 'IT', 'technology', 'smartphone', 'AI', 'cybersecurity']
@@ -158,9 +170,10 @@ class Config:
     # ========================
     # Content Moderation
     # ========================
+    # BEST SOLUTION UPDATE: Removed 'violence', 'hate', 'terrorism', 'weapon', 'drug'
+    # because these words appear frequently in legitimate General news (police raids, court cases, etc.)
     PROHIBITED_KEYWORDS = [
-        'violence', 'hate', 'terrorism', 'weapon', 'drug', 'gambling',
-        'adult', 'pornography', 'nudity', 'sexual', 'explicit'
+        'gambling', 'adult', 'pornography', 'nudity', 'sexual', 'explicit'
     ]
 
     # ========================
@@ -224,10 +237,14 @@ class Config:
         return missing
 
     @classmethod
-    def validate_text_length(cls, text: str, min_length: int = 50, max_length: int = None) -> bool:
+    def validate_text_length(cls, text: str, min_length: int = None, max_length: int = None) -> bool:
         """Validate text length for processing"""
+        # BEST SOLUTION UPDATE: Use class constant as default if min_length is not passed
+        if min_length is None:
+            min_length = cls.MIN_ARTICLE_LENGTH
+
         if not text or len(text.strip()) < min_length:
-            logger.warning(f"Text too short: {len(text)} characters (minimum: {min_length})")
+            logger.warning(f"Text too short: {len(text) if text else 0} characters (minimum: {min_length})")
             return False
 
         # Use MAX_TTS_LENGTH as default if max_length is not specified
