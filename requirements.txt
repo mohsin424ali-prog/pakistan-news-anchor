@@ -16,7 +16,7 @@ validators==0.22.0
 lxml_html_clean>=0.1.0
 
 # Text-to-speech and audio processing
-edge-tts==6.1.3
+edge-tts>=6.1.9
 gTTS==2.4.0
 pydub==0.25.1
 
