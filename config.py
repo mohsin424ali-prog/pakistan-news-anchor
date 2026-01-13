@@ -251,9 +251,9 @@ class Config:
     def setup_directories(cls) -> None:
         """Create required directories"""
         try:
-            cls.TEMP_DIR.mkdir(exist_ok=True)
-            cls.OUTPUT_DIR.mkdir(exist_ok=True)
-            cls.AVATAR_DIR.mkdir(exist_ok=True)
+            cls.TEMP_DIR.mkdir(exist_ok=True, parents=True)
+            cls.OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
+            cls.AVATAR_DIR.mkdir(exist_ok=True, parents=True)
             logger.info("Directories initialized successfully")
         except Exception as e:
             logger.error(f"Failed to create directories: {e}")
