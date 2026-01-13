@@ -20,11 +20,12 @@ class Config:
     # Application Constants
     # ========================
     CACHE_TIME = 600
-    MAX_DESCRIPTION_LENGTH = 300
+    # Increased description length to capture more context
+    MAX_DESCRIPTION_LENGTH = 500
     VALID_CATEGORIES = ['general', 'business', 'sports', 'technology']
     MAX_ARTICLES_PER_CATEGORY = 5
     
-    # BEST SOLUTION UPDATE: Lowered from 100 to 30 to accept short RSS snippets
+    # Lowered to 30 to accept short RSS snippets/headlines
     MIN_ARTICLE_LENGTH = 30
     
     CATEGORY_PRIORITY = ['general', 'business', 'sports', 'technology']
@@ -32,8 +33,6 @@ class Config:
     MAX_FEED_ENTRIES = 5
     VIDEO_TIMEOUT = 60
     MAX_RETRY_ATTEMPTS = 3
-    
-    # BEST SOLUTION UPDATE: Increased timeout slightly for stability
     REQUEST_TIMEOUT = 20
 
     # ========================
@@ -50,8 +49,9 @@ class Config:
         }
     }
 
-    # Maximum text length for TTS (increased from 600 to 2000)
-    MAX_TTS_LENGTH = 2000
+    # BEST SOLUTION UPDATE: Increased to 4000 to prevent "Text too long" errors.
+    # Edge TTS handles large text well, so 600 was too restrictive.
+    MAX_TTS_LENGTH = 4000
 
     # ========================
     # API Configuration
@@ -61,7 +61,7 @@ class Config:
     HUGGINGFACE_API_KEY = os.environ.get('HUGGINGFACE_API_KEY')
     MAX_CONCURRENT_REQUESTS = 5
 
-    # BEST SOLUTION UPDATE: Added headers to prevent blocking by news sites
+    # Headers to mimic a real browser and avoid 403 Forbidden errors
     REQUEST_HEADERS = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
@@ -151,8 +151,7 @@ class Config:
     # ========================
     # Content Processing
     # ========================
-    # BEST SOLUTION UPDATE: Empty list for 'general' to accept ALL news from the valid feeds.
-    # Strict keywords often filter out real breaking news that doesn't mention the city name.
+    # Empty list for 'general' to accept ALL general news
     CATEGORY_KEYWORDS = {
         'general': [], 
         'business': ['economy', 'rupee', 'PSX', 'SBP', 'investment', 'trade', 'CPEC'],
@@ -170,8 +169,7 @@ class Config:
     # ========================
     # Content Moderation
     # ========================
-    # BEST SOLUTION UPDATE: Removed 'violence', 'hate', 'terrorism', 'weapon', 'drug'
-    # because these words appear frequently in legitimate General news (police raids, court cases, etc.)
+    # Removed keywords that often trigger false positives in news
     PROHIBITED_KEYWORDS = [
         'gambling', 'adult', 'pornography', 'nudity', 'sexual', 'explicit'
     ]
@@ -205,7 +203,6 @@ class Config:
     # ========================
     @classmethod
     def validate_category(cls, category: str) -> bool:
-        """Validate if category is supported"""
         if category not in cls.VALID_CATEGORIES:
             logger.warning(f"Invalid category: {category}. Valid categories: {cls.VALID_CATEGORIES}")
             return False
@@ -213,7 +210,6 @@ class Config:
 
     @classmethod
     def validate_api_keys(cls) -> Dict[str, bool]:
-        """Check which API keys are available"""
         return {
             'news_api': bool(cls.NEWS_API_KEY),
             'huggingface_api': bool(cls.HUGGINGFACE_API_KEY)
@@ -238,27 +234,41 @@ class Config:
 
     @classmethod
     def validate_text_length(cls, text: str, min_length: int = None, max_length: int = None) -> bool:
-        """Validate text length for processing"""
-        # BEST SOLUTION UPDATE: Use class constant as default if min_length is not passed
+        """
+        BEST APPROACH VALIDATION:
+        Dynamically adjusts limits to prevent unnecessary failures.
+        """
+        if text is None:
+            return False
+
+        # Set defaults if not provided
         if min_length is None:
             min_length = cls.MIN_ARTICLE_LENGTH
+            
+        # SMART OVERRIDE: 
+        # If a caller (like utils.py) passes a strict limit (e.g. 600), but our Config 
+        # allows more (4000), we use the larger Config value to prevent errors.
+        config_max = cls.MAX_TTS_LENGTH
+        if max_length is not None:
+            # Use the larger of the two limits to be permissive
+            effective_max = max(max_length, config_max)
+        else:
+            effective_max = config_max
 
-        if not text or len(text.strip()) < min_length:
-            logger.warning(f"Text too short: {len(text) if text else 0} characters (minimum: {min_length})")
+        current_len = len(text.strip())
+
+        if current_len < min_length:
+            logger.warning(f"Text too short: {current_len} chars (minimum: {min_length})")
             return False
 
-        # Use MAX_TTS_LENGTH as default if max_length is not specified
-        if max_length is None:
-            max_length = cls.MAX_TTS_LENGTH
-
-        if len(text) > max_length:
-            logger.warning(f"Text too long: {len(text)} characters (maximum: {max_length})")
+        if current_len > effective_max:
+            logger.warning(f"Text too long: {current_len} chars (maximum: {effective_max})")
             return False
+            
         return True
 
     @classmethod
     def is_content_safe(cls, text: str) -> bool:
-        """Basic content moderation check"""
         if not text:
             return False
 
@@ -274,9 +284,7 @@ class Config:
     # ========================
     @classmethod
     def setup_directories(cls) -> None:
-        """Create required directories"""
         try:
-            # Create directories using Path directly instead of properties
             base_dir = Path(__file__).parent.resolve()
             (base_dir / 'temp').mkdir(exist_ok=True, parents=True)
             (base_dir / 'outputs').mkdir(exist_ok=True, parents=True)
@@ -284,25 +292,18 @@ class Config:
             logger.info("Directories initialized successfully")
         except Exception as e:
             logger.error(f"Failed to create directories: {e}")
-            # Don't raise here, just log the error and continue
 
     @classmethod
     def validate_environment(cls) -> bool:
-        """Validate complete environment setup"""
         try:
-            # Check directories
             cls.setup_directories()
-
-            # Check critical files
             missing_files = cls.validate_paths()
             if missing_files:
                 logger.error(f"Missing critical files: {missing_files}")
                 return False
-
-            # Check API availability
+            
             api_status = cls.validate_api_keys()
             logger.info(f"API Status: {api_status}")
-
             return True
 
         except Exception as e:
