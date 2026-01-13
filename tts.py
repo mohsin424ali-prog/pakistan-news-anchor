@@ -1,82 +1,65 @@
-import hashlib
 import asyncio
 import os
 import time
-import streamlit as st
+import logging
 from gtts import gTTS
 import edge_tts
 from config import Config
-from async_processor import async_processor, retry_with_backoff
+from async_processor import async_processor
 
-@retry_with_backoff
-async def generate_summary_audio(headlines, language):
-    summary_text = "\n".join([
-        f"{h['category']} news: {h['text']}"
-        for h in headlines
-    ])
+logger = logging.getLogger(__name__)
 
-    # Submit to async processor
-    task_id = async_processor.submit_task(
-        'tts',
-        text=summary_text,
-        gender="Male",
-        language=language
-    )
-
-    return task_id
-
-@retry_with_backoff
+# --- UI INTERFACE ---
 async def generate_audio(text, gender, language):
+    """
+    Submits a request to the background queue.
+    Returns a Task ID immediately.
+    """
     if not text or len(text) < Config.MIN_ARTICLE_LENGTH:
-        st.error("Insufficient text for audio generation")
         return None
 
-    # Submit to async processor
     task_id = async_processor.submit_task(
         'tts',
         text=text,
         gender=gender,
         language=language
     )
-
     return task_id
 
-async def _gtts_urdu(text, audio_path):
+# --- BACKGROUND EXECUTION ---
+async def execute_tts_work(text, gender, language):
+    """
+    The actual worker logic that performs the TTS and saves the file.
+    Returns the absolute path to the generated file.
+    """
+    timestamp = int(time.time() * 1000)
+    audio_dir = os.path.abspath("temp_audio")
+    os.makedirs(audio_dir, exist_ok=True)
+    
+    file_ext = "mp3"
+    audio_path = os.path.join(audio_dir, f"tts_{language}_{timestamp}.{file_ext}")
+    
     try:
-        tts = gTTS(text=text, lang='ur', tld='com.pk', slow=False)
-        await asyncio.to_thread(tts.save, audio_path)
-        return audio_path if os.path.exists(audio_path) else None
+        if language == 'ur':
+            return await _gtts_urdu(text, audio_path)
+        else:
+            return await _edge_tts(text, gender, audio_path)
     except Exception as e:
-        st.error(f"Urdu TTS Error: {str(e)}")
+        logger.error(f"TTS Execution failed: {e}")
         return None
+
+async def _gtts_urdu(text, audio_path):
+    tts = gTTS(text=text, lang='ur', tld='com.pk')
+    # Run gTTS in a thread to keep the event loop free
+    await asyncio.to_thread(tts.save, audio_path)
+    return audio_path if os.path.exists(audio_path) else None
 
 async def _edge_tts(text, gender, audio_path):
-    try:
-        voice = Config.TTS_CONFIG['en']['voice']
-        if gender == "Female":
-            voice = "en-GB-LibbyNeural"
-
-        communicate = edge_tts.Communicate(text, voice)
-        await communicate.save(audio_path)
-        return audio_path if os.path.exists(audio_path) else None
-    except Exception as e:
-        st.error(f"English TTS Error: {str(e)}")
-        return None
-
-def get_audio_result(task_id: str, timeout: int = 60):
-    """Get the result of an audio generation task"""
-    start_time = time.time()
-
-    while time.time() - start_time < timeout:
-        status = async_processor.get_task_status(task_id)
-
-        if status['status'] == 'completed':
-            return status.get('result', {}).get('result')
-        elif status['status'] == 'failed':
-            st.error(f"Audio generation failed: {status.get('result', {}).get('error')}")
-            return None
-
-        time.sleep(0.5)
-
-    st.warning("Audio generation timed out")
-    return None
+    # Select voice based on Config and Gender
+    voice = Config.TTS_CONFIG['en']['voice']
+    if gender == "Female":
+        voice = "en-GB-LibbyNeural"
+        
+    communicate = edge_tts.Communicate(text, voice)
+    await communicate.save(audio_path)
+    return audio_path if os.path.exists(audio_path) else None
