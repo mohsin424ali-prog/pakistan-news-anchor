@@ -28,7 +28,8 @@ from config import Config
 from video import generate_video, validate_video_requirements, ensure_wav2lip_model
 from tts import generate_summary_audio, generate_audio
 from cache_manager import get_cache_status
-from async_processor import async_processor, ProgressTracker
+# FIXED: Removed ProgressTracker from import
+from async_processor import async_processor 
 
 # Note: async_processor.start() moved to main() function to prevent initialization order issues
 
@@ -132,7 +133,7 @@ def main():
                     selected_article = articles[selected_article_idx]
 
                     # ---------------------------------------------------------
-                    # IMPROVED VIDEO GENERATION LOGIC STARTS HERE
+                    # IMPROVED VIDEO GENERATION LOGIC
                     # ---------------------------------------------------------
                     if st.button("🎥 Generate Video", type="primary", use_container_width=True):
                         try:
