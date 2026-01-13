@@ -23,7 +23,7 @@ class Config:
     MAX_DESCRIPTION_LENGTH = 300
     VALID_CATEGORIES = ['general', 'business', 'sports', 'technology']
     MAX_ARTICLES_PER_CATEGORY = 5
-    MIN_ARTICLE_LENGTH = 50
+    MIN_ARTICLE_LENGTH = 100
     CATEGORY_PRIORITY = ['general', 'business', 'sports', 'technology']
     ARTICLE_AGE_LIMIT = 48
     MAX_FEED_ENTRIES = 5
@@ -44,6 +44,9 @@ class Config:
             'ur': {'min_lines': 3, 'max_lines': 5, 'chars_per_line': 60}
         }
     }
+
+    # Maximum text length for TTS (increased from 600 to 2000)
+    MAX_TTS_LENGTH = 2000
 
     # ========================
     # API Configuration
@@ -221,11 +224,16 @@ class Config:
         return missing
 
     @classmethod
-    def validate_text_length(cls, text: str, min_length: int = 50, max_length: int = 1000) -> bool:
+    def validate_text_length(cls, text: str, min_length: int = 50, max_length: int = None) -> bool:
         """Validate text length for processing"""
         if not text or len(text.strip()) < min_length:
             logger.warning(f"Text too short: {len(text)} characters (minimum: {min_length})")
             return False
+
+        # Use MAX_TTS_LENGTH as default if max_length is not specified
+        if max_length is None:
+            max_length = cls.MAX_TTS_LENGTH
+
         if len(text) > max_length:
             logger.warning(f"Text too long: {len(text)} characters (maximum: {max_length})")
             return False
@@ -251,13 +259,15 @@ class Config:
     def setup_directories(cls) -> None:
         """Create required directories"""
         try:
-            cls.TEMP_DIR.mkdir(exist_ok=True, parents=True)
-            cls.OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
-            cls.AVATAR_DIR.mkdir(exist_ok=True, parents=True)
+            # Create directories using Path directly instead of properties
+            base_dir = Path(__file__).parent.resolve()
+            (base_dir / 'temp').mkdir(exist_ok=True, parents=True)
+            (base_dir / 'outputs').mkdir(exist_ok=True, parents=True)
+            (base_dir / 'avatars').mkdir(exist_ok=True, parents=True)
             logger.info("Directories initialized successfully")
         except Exception as e:
             logger.error(f"Failed to create directories: {e}")
-            raise
+            # Don't raise here, just log the error and continue
 
     @classmethod
     def validate_environment(cls) -> bool:
