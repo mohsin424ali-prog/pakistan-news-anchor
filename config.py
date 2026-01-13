@@ -49,9 +49,9 @@ class Config:
         }
     }
 
-    # BEST SOLUTION UPDATE: Increased to 4000 to prevent "Text too long" errors.
+    # BEST SOLUTION UPDATE: Increased to 10000 to prevent "Text too long" errors.
     # Edge TTS handles large text well, so 600 was too restrictive.
-    MAX_TTS_LENGTH = 4000
+    MAX_TTS_LENGTH = 10000
 
     # ========================
     # API Configuration
