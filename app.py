@@ -34,23 +34,38 @@ def show_hugging_face_info():
     </div>
     """, unsafe_allow_html=True)
 
-def show_debug_panel(text, language):
-    """Show what text is actually being sent to TTS"""
-    with st.expander("🔍 DEBUG: TTS Text Analysis", expanded=False):
-        st.write("**Text Length:**", len(text), "characters")
+def show_debug_panel(article, language):
+    """Show what text is actually being sent to TTS + LLM processing steps"""
+    tts_text = article.get('tts_text', '')
+    
+    with st.expander("🔍 DEBUG: Text Processing Pipeline", expanded=False):
+        # Step 1: Original RSS text
+        st.write("### Step 1️⃣: Original RSS Feed Text")
+        raw_desc = article.get('raw_description', 'N/A')
+        st.text_area("Raw from RSS:", raw_desc[:300], height=100)
+        
+        # Step 2: After LLM cleaning
+        st.write("### Step 2️⃣: After LLM Cleaning + Summarization")
+        cleaned_desc = article.get('description', 'N/A')
+        st.text_area("LLM cleaned:", cleaned_desc[:300], height=100)
+        
+        # Step 3: Final TTS text
+        st.write("### Step 3️⃣: Final TTS Text (with SSML)")
+        st.text_area("Sent to TTS engine:", tts_text[:500], height=150)
+        
+        st.divider()
+        
+        # Analysis
+        st.write("**Text Length:**", len(tts_text), "characters")
         
         # Show raw text with hidden characters visible
-        st.write("**Raw Text (first 300 chars):**")
-        st.code(repr(text[:300]), language="python")
-        
-        # Show actual text
-        st.write("**Displayed Text:**")
-        st.text_area("Text that will be spoken:", text[:500], height=150)
+        st.write("**Raw Representation (first 300 chars):**")
+        st.code(repr(tts_text[:300]), language="python")
         
         # Character analysis
         st.write("**Character Analysis:**")
         special_chars = {}
-        for char in text:
+        for char in tts_text:
             if ord(char) > 127 or char in '—–""''…':
                 special_chars[char] = special_chars.get(char, 0) + 1
         
@@ -62,14 +77,23 @@ def show_debug_panel(text, language):
             st.success("✅ No problematic special characters found!")
         
         # Check for SSML tags
-        if '<' in text or '>' in text:
-            st.warning("⚠️ XML/SSML tags detected in text!")
-            st.write("Tags found:", [tag for tag in text.split('<') if '>' in tag])
+        if '<' in tts_text or '>' in tts_text:
+            if language == 'en':
+                st.success("✅ SSML tags present (correct for English/Edge TTS)")
+            else:
+                st.error("❌ SSML tags found in Urdu text (will cause gTTS to fail!)")
+            
+            tags = [tag for tag in tts_text.split('<') if '>' in tag]
+            with st.expander("View SSML tags"):
+                st.json(tags)
         else:
-            st.success("✅ No XML/SSML tags found")
+            if language == 'ur':
+                st.success("✅ No SSML tags (correct for Urdu/gTTS)")
+            else:
+                st.warning("⚠️ No SSML tags in English text")
         
         # Punctuation check
-        punct_count = sum(1 for c in text if c in '—–""''…•·●')
+        punct_count = sum(1 for c in tts_text if c in '—–""''…•·●')
         if punct_count > 0:
             st.error(f"❌ Found {punct_count} special punctuation marks that might be spoken!")
         else:
@@ -98,6 +122,14 @@ def main():
 
         # DEBUG MODE TOGGLE
         debug_mode = st.checkbox("🔧 Debug Mode (Show TTS text analysis)", value=False)
+        
+        # LLM CLEANING TOGGLE
+        use_llm = st.checkbox("🤖 Use LLM Text Cleaning (slower but better quality)", value=True)
+        if use_llm:
+            st.caption("⏱️ Adds ~2-3 seconds per article for better quality")
+        
+        # Store in session state for access in processing functions
+        st.session_state['use_llm_cleaning'] = use_llm
 
         st.divider()
 
@@ -165,8 +197,7 @@ def main():
                 
                 # SHOW DEBUG PANEL IF ENABLED
                 if debug_mode:
-                    tts_text = selected_article.get('tts_text', '')
-                    show_debug_panel(tts_text, lang_code)
+                    show_debug_panel(selected_article, lang_code)
                 
                 if st.button("🚀 Generate Video", type="primary", use_container_width=True):
                     try:
