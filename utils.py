@@ -19,7 +19,7 @@ class ValidationError(Exception):
 def aggressive_punctuation_cleanup(text):
     """
     CRITICAL FIX: Remove/normalize ALL punctuation that TTS engines might speak aloud.
-    This is the KEY to preventing 'comma', 'hyphen', 'dash' from being spoken.
+    This runs BEFORE any SSML processing.
     """
     if not text:
         return ""
@@ -27,31 +27,40 @@ def aggressive_punctuation_cleanup(text):
     # Step 1: Decode HTML entities first (critical for RSS feeds)
     text = html.unescape(text)
     
-    # Step 2: Replace all types of dashes with regular space or hyphen
-    # Em dash, en dash, horizontal bar, minus sign → space
+    # Step 2: Replace all types of dashes with simple hyphen or space
+    # Em dash (—), en dash (–), minus (−), figure dash, horizontal bar → space
     text = re.sub(r'[—–−‒―⁻]', ' ', text)
     
     # Step 3: Normalize all types of quotes to straight quotes
     text = re.sub(r'[""„‟❝❞]', '"', text)  # Double quotes
     text = re.sub(r'[''‚‛❛❜]', "'", text)  # Single quotes
     
-    # Step 4: Remove ellipsis and multiple dots (keeps sentence flow)
+    # Step 4: Remove ellipsis and multiple dots
     text = re.sub(r'\.{2,}', '.', text)
     text = re.sub(r'…', '.', text)
     
-    # Step 5: Remove special bullets and list markers that get spoken
-    text = re.sub(r'[•·●○■□▪▫]', '', text)
+    # Step 5: Remove special bullets and list markers
+    text = re.sub(r'[•·●○■□▪▫➤➢►▶]', '', text)
     
-    # Step 6: Normalize whitespace around punctuation
-    # Remove space before punctuation
-    text = re.sub(r'\s+([.,!?;:])', r'\1', text)
-    # Add single space after punctuation if missing
-    text = re.sub(r'([.,!?;:])([A-Za-z])', r'\1 \2', text)
+    # Step 6: Remove or replace symbols that TTS might speak
+    text = re.sub(r'[©®™℗]', '', text)  # Copyright symbols
+    text = re.sub(r'[°º]', ' degrees ', text)  # Degree symbol
+    text = re.sub(r'%', ' percent ', text)  # Percent
+    text = re.sub(r'&', ' and ', text)  # Ampersand
     
-    # Step 7: Remove parentheses content that might disrupt flow (optional - be careful)
+    # Step 7: Clean mathematical/technical symbols
+    text = re.sub(r'[×÷±≈≠≤≥]', ' ', text)
+    
+    # Step 8: Remove brackets/parentheses content that might be citations
+    # (optional - comment out if you want to keep parenthetical content)
     # text = re.sub(r'\([^)]*\)', '', text)
+    # text = re.sub(r'\[[^\]]*\]', '', text)
     
-    # Step 8: Clean multiple spaces
+    # Step 9: Normalize whitespace around punctuation
+    text = re.sub(r'\s+([.,!?;:])', r'\1', text)  # Remove space before punctuation
+    text = re.sub(r'([.,!?;:])([A-Za-z])', r'\1 \2', text)  # Add space after punctuation
+    
+    # Step 10: Clean multiple spaces
     text = re.sub(r'\s{2,}', ' ', text)
     
     return text.strip()
@@ -93,15 +102,16 @@ def sanitize_html(text):
         # Remove all tags, keep only text
         text = soup.get_text(separator=' ', strip=True)
         
-        # Additional cleanup
-        text = aggressive_punctuation_cleanup(text)
         return text
     except Exception as e:
         logger.error(f"HTML sanitization failed: {e}")
         return text
 
 def normalize_numbers(text):
-    """Convert numbers and currency to words"""
+    """
+    Convert numbers and currency to words SELECTIVELY.
+    Keep years and dates as-is to avoid robotic speech.
+    """
     if not text:
         return text
 
@@ -121,12 +131,20 @@ def normalize_numbers(text):
             text
         )
         
-        # Regular numbers
-        text = re.sub(
-            r'\b\d+\b',
-            lambda m: num2words(int(m.group())),
-            text
-        )
+        # Convert small numbers (1-99) to words, but SKIP years (1900-2099)
+        def convert_number(match):
+            num = int(match.group())
+            # Skip years
+            if 1900 <= num <= 2099:
+                return str(num)
+            # Skip large numbers (let TTS handle them naturally)
+            if num > 999:
+                return str(num)
+            # Convert small numbers
+            return num2words(num)
+        
+        text = re.sub(r'\b\d+\b', convert_number, text)
+        
     except Exception as e:
         logger.error(f"Number normalization failed: {e}")
         pass
@@ -134,7 +152,8 @@ def normalize_numbers(text):
 
 def prepare_for_tts(text, language='en', max_length=None):
     """
-    BEST APPROACH: Separate processing for SSML-supporting (Edge) vs non-SSML (gTTS) engines
+    FIXED VERSION: Clean text FIRST, then add SSML for engines that support it.
+    This prevents punctuation names from being spoken.
     """
     if not text:
         return ""
@@ -143,44 +162,41 @@ def prepare_for_tts(text, language='en', max_length=None):
         max_length = Config.MAX_TTS_LENGTH
 
     try:
-        # Step 1: Aggressive cleanup FIRST
-        text = aggressive_punctuation_cleanup(text)
+        # STEP 1: AGGRESSIVE CLEANUP FIRST (before any SSML)
         text = text.replace('\n', ' ').strip()
+        text = sanitize_html(text)  # Remove HTML tags
+        text = aggressive_punctuation_cleanup(text)  # Clean special punctuation
+        text = normalize_numbers(text)  # Convert numbers to words
 
-        # Step 2: Basic validation
+        # STEP 2: Basic validation
         if len(text) < 10:
             logger.warning("Text too short for TTS")
             return ""
 
-        # Step 3: Sanitize and normalize
-        processed = sanitize_html(text)
-        processed = normalize_numbers(processed)
-
-        # Step 4: Language-specific character filtering
+        # STEP 3: Language-specific character filtering
         if language == 'ur':
             # Keep Urdu characters, basic punctuation, and spaces only
-            processed = re.sub(r'[^\u0600-\u06FF\u0750-\u077F\s.,!?]', '', processed)
+            text = re.sub(r'[^\u0600-\u06FF\u0750-\u077F\s.,!?]', '', text)
         elif language == 'en':
             # Keep English alphanumeric, basic punctuation, and spaces only
-            processed = re.sub(r'[^a-zA-Z0-9\s.,!?]', '', processed)
+            text = re.sub(r'[^a-zA-Z0-9\s.,!?\-]', '', text)
 
-        # Step 5: Final cleanup
-        processed = re.sub(r'\s{2,}', ' ', processed)
-        processed = processed.strip()
+        # STEP 4: Final cleanup
+        text = re.sub(r'\s{2,}', ' ', text)
+        text = text.strip()
 
-        # Step 6: Truncate if needed
-        if len(processed) > max_length:
-            processed = smart_truncate(processed, max_length)
+        # STEP 5: Truncate if needed
+        if len(text) > max_length:
+            text = smart_truncate(text, max_length)
 
-        # Step 7: Engine-specific formatting
+        # STEP 6: Engine-specific formatting (AFTER all cleanup)
         if language == 'en':
-            # Edge TTS supports SSML - use it for natural pauses
-            processed = add_natural_pauses(processed)
-            return f"<speak>{processed}</speak>"
+            # Edge TTS supports SSML - add natural pauses
+            text_with_pauses = add_natural_pauses(text)
+            return f"<speak>{text_with_pauses}</speak>"
         else:
-            # gTTS does NOT support SSML - return plain text with natural punctuation
-            # The punctuation itself will create pauses
-            return processed
+            # gTTS does NOT support SSML - return clean plain text only
+            return text
 
     except Exception as e:
         logger.error(f"TTS preparation failed: {e}")
@@ -189,7 +205,7 @@ def prepare_for_tts(text, language='en', max_length=None):
 def add_natural_pauses(text):
     """
     Add SSML breaks only for Edge TTS (English).
-    This creates natural-sounding pauses without speaking punctuation.
+    Works on CLEAN text without special punctuation.
     """
     # Short pause after commas
     text = re.sub(r',\s*', ', <break time="300ms"/>', text)
@@ -197,8 +213,8 @@ def add_natural_pauses(text):
     # Medium pause after sentence-ending punctuation
     text = re.sub(r'([.!?])\s*', r'\1 <break time="500ms"/>', text)
     
-    # Emphasize important words (optional - cities example)
-    cities = ['Karachi', 'Lahore', 'Islamabad', 'Pakistan']
+    # Emphasize important words (cities example)
+    cities = ['Karachi', 'Lahore', 'Islamabad', 'Pakistan', 'Chitral', 'Peshawar']
     for city in cities:
         text = re.sub(
             rf'\b({city})\b',
