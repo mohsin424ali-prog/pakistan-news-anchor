@@ -84,7 +84,8 @@ def show_debug_panel(article, language):
                 st.error("❌ SSML tags found in Urdu text (will cause gTTS to fail!)")
             
             tags = [tag for tag in tts_text.split('<') if '>' in tag]
-            with st.expander("View SSML tags"):
+            st.write(f"**SSML Tags Found:** {len(tags)} tags")
+            if st.checkbox("Show SSML tag details", key="ssml_details"):
                 st.json(tags)
         else:
             if language == 'ur':
