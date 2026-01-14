@@ -25,7 +25,7 @@ def show_hugging_face_info():
     """Show Hugging Face specific information"""
     st.markdown("""
     <div style="background: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #ff4b4b; margin-bottom: 20px;">
-    <h4 style="margin-top:0;">🤖 Hugging Face Spaces Deployment</h4>
+    <h4 style="margin-top:0;">🤗 Hugging Face Spaces Deployment</h4>
     <ul style="margin-bottom:0;">
     <li><strong>Wav2Lip:</strong> Model downloads automatically on first run (~430MB).</li>
     <li><strong>Memory:</strong> Processing requires ~1GB RAM.</li>
@@ -33,6 +33,47 @@ def show_hugging_face_info():
     </ul>
     </div>
     """, unsafe_allow_html=True)
+
+def show_debug_panel(text, language):
+    """Show what text is actually being sent to TTS"""
+    with st.expander("🔍 DEBUG: TTS Text Analysis", expanded=False):
+        st.write("**Text Length:**", len(text), "characters")
+        
+        # Show raw text with hidden characters visible
+        st.write("**Raw Text (first 300 chars):**")
+        st.code(repr(text[:300]), language="python")
+        
+        # Show actual text
+        st.write("**Displayed Text:**")
+        st.text_area("Text that will be spoken:", text[:500], height=150)
+        
+        # Character analysis
+        st.write("**Character Analysis:**")
+        special_chars = {}
+        for char in text:
+            if ord(char) > 127 or char in '—–""''…':
+                special_chars[char] = special_chars.get(char, 0) + 1
+        
+        if special_chars:
+            st.warning(f"⚠️ Found {len(special_chars)} types of special characters:")
+            for char, count in list(special_chars.items())[:10]:
+                st.write(f"  • `{char}` (U+{ord(char):04X}) - appears {count} times")
+        else:
+            st.success("✅ No problematic special characters found!")
+        
+        # Check for SSML tags
+        if '<' in text or '>' in text:
+            st.warning("⚠️ XML/SSML tags detected in text!")
+            st.write("Tags found:", [tag for tag in text.split('<') if '>' in tag])
+        else:
+            st.success("✅ No XML/SSML tags found")
+        
+        # Punctuation check
+        punct_count = sum(1 for c in text if c in '—–""''…•·●')
+        if punct_count > 0:
+            st.error(f"❌ Found {punct_count} special punctuation marks that might be spoken!")
+        else:
+            st.success("✅ No problematic punctuation found")
 
 def main():
     """Main application entry point"""
@@ -52,6 +93,11 @@ def main():
             ["general", "business", "sports", "technology"],
             key="category_select"
         )
+
+        st.divider()
+
+        # DEBUG MODE TOGGLE
+        debug_mode = st.checkbox("🔧 Debug Mode (Show TTS text analysis)", value=False)
 
         st.divider()
 
@@ -101,7 +147,7 @@ def main():
 
             st.divider()
             
-            # --- FIXED SECTION: Container instead of nested expander ---
+            # --- Video Generation Section ---
             st.subheader("🎥 Create Video Broadcast")
             with st.container(border=True):
                 col_sel, col_btn = st.columns([3, 1])
@@ -117,11 +163,16 @@ def main():
                 
                 selected_article = articles[selected_article_idx]
                 
+                # SHOW DEBUG PANEL IF ENABLED
+                if debug_mode:
+                    tts_text = selected_article.get('tts_text', '')
+                    show_debug_panel(tts_text, lang_code)
+                
                 if st.button("🚀 Generate Video", type="primary", use_container_width=True):
                     try:
                         # 1. Validation
                         if not os.path.exists("Wav2Lip/checkpoints/wav2lip_gan.pth"):
-                            with st.status("📥 First-time setup: Downloading Wav2Lip model..."):
+                            with st.status("🔥 First-time setup: Downloading Wav2Lip model..."):
                                 if not ensure_wav2lip_model():
                                     st.error("Model download failed. Check internet.")
                                     st.stop()
@@ -135,10 +186,13 @@ def main():
                         status_box = st.empty()
                         prog_bar = st.progress(5)
 
+                        # SHOW WHAT'S BEING SENT TO TTS
+                        if debug_mode:
+                            st.info(f"📤 Sending to TTS: {len(tts_text)} characters")
+
                         # 3. Step 1: Audio Generation (Async Polling)
                         status_box.info("🎙️ Step 1/2: Generating AI Voice...")
                         
-                        # Fix: Calling generate_audio directly (returns string task_id)
                         task_id = generate_audio(tts_text, "Male", lang_code)
                         
                         audio_path = None
@@ -154,7 +208,10 @@ def main():
                                     audio_path = result_data.get('result')
                                     break
                             elif status['status'] == 'failed':
-                                st.error(f"Audio Error: {status.get('result', {}).get('error')}")
+                                error_msg = status.get('result', {}).get('error', 'Unknown error')
+                                st.error(f"Audio Error: {error_msg}")
+                                if debug_mode:
+                                    st.code(str(status))
                                 st.stop()
                             
                             time.sleep(1)
@@ -164,13 +221,16 @@ def main():
                             st.error("Audio generation timed out.")
                             st.stop()
 
+                        if debug_mode:
+                            st.success(f"✅ Audio generated: {audio_path}")
+                            st.audio(audio_path)
+
                         # 4. Step 2: Video Generation
                         status_box.info("🎬 Step 2/2: Lip-Syncing Video (This takes 1-2 minutes)...")
                         prog_bar.progress(40)
                         
                         avatar_source = Config().AUTO_AVATARS.get(lang_code) if auto_avatar else custom_avatar
                         
-                        # generate_video is a blocking call (subprocess)
                         final_video_path = generate_video(audio_path, avatar_source, lang_code, auto_avatar)
                         
                         if final_video_path and os.path.exists(final_video_path):
