@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 import sys
 import os
@@ -200,90 +201,234 @@ def main():
                 if debug_mode:
                     show_debug_panel(selected_article, lang_code)
                 
-                if st.button("🚀 Generate Video", type="primary", use_container_width=True):
+                # =================================================================
+                # IMPROVED VIDEO GENERATION LOGIC WITH DEBUGGING
+                # =================================================================
+                if st.button("🎥 Generate Video", type="primary", use_container_width=True):
                     try:
-                        # 1. Validation
+                        print("\n" + "="*80)
+                        print("🎬 VIDEO GENERATION STARTED")
+                        print("="*80)
+                        
+                        # Check if model exists, download if necessary
                         if not os.path.exists("Wav2Lip/checkpoints/wav2lip_gan.pth"):
-                            with st.status("🔥 First-time setup: Downloading Wav2Lip model..."):
+                            st.info("📥 Downloading Wav2Lip model... This may take several minutes")
+                            with st.spinner("Downloading model..."):
                                 if not ensure_wav2lip_model():
-                                    st.error("Model download failed. Check internet.")
+                                    st.error("Failed to download required model. Please try again later.")
                                     st.stop()
 
-                        tts_text = selected_article.get('tts_text', '')
-                        if not tts_text or len(tts_text) < 10:
-                            st.error("Article content too short for processing.")
+                        # Validate other requirements
+                        if not validate_video_requirements():
+                            st.error("Please check video requirements in the sidebar")
                             st.stop()
 
-                        # 2. Status UI
-                        status_box = st.empty()
-                        prog_bar = st.progress(5)
-
-                        # SHOW WHAT'S BEING SENT TO TTS
-                        if debug_mode:
-                            st.info(f"📤 Sending to TTS: {len(tts_text)} characters")
-
-                        # 3. Step 1: Audio Generation (Async Polling)
-                        status_box.info("🎙️ Step 1/2: Generating AI Voice...")
+                        # Check text content
+                        tts_text = selected_article.get('tts_text', '')
+                        print(f"📝 Article text length: {len(tts_text)} chars")
+                        print(f"📝 Text preview: {tts_text[:200]}...")
                         
+                        if not tts_text or len(tts_text) < Config.MIN_ARTICLE_LENGTH:
+                            st.error(f"Article text too short ({len(tts_text)} chars, min {Config.MIN_ARTICLE_LENGTH})")
+                            print(f"❌ Text validation failed: {len(tts_text)} < {Config.MIN_ARTICLE_LENGTH}")
+                            st.stop()
+
+                        # Create progress containers
+                        audio_progress = st.empty()
+                        audio_status = st.empty()
+                        video_progress = st.empty()
+                        video_status = st.empty()
+
+                        # Step 1: Generate audio
+                        print("\n" + "-"*80)
+                        print("STEP 1: AUDIO GENERATION")
+                        print("-"*80)
+                        
+                        audio_status.info("🎙️ Step 1/2: Generating audio...")
+                        audio_bar = audio_progress.progress(0)
+                        
+                        # Submit audio generation task
+                        print(f"📤 Submitting TTS task: lang={lang_code}, text_len={len(tts_text)}")
                         task_id = generate_audio(tts_text, "Male", lang_code)
+
+                        if not task_id:
+                            error_msg = "Failed to submit audio generation task"
+                            print(f"❌ {error_msg}")
+                            audio_status.error(f"❌ {error_msg}")
+                            st.stop()
                         
+                        print(f"✅ Task submitted: {task_id}")
+
+                        # Wait for audio with progress updates
                         audio_path = None
-                        start_wait = time.time()
+                        start_time = time.time()
+                        timeout = 60
+                        check_count = 0
                         
-                        # Wait for async processor to finish TTS
-                        while time.time() - start_wait < 90:
+                        while time.time() - start_time < timeout:
+                            check_count += 1
+                            elapsed = time.time() - start_time
                             status = async_processor.get_task_status(task_id)
                             
+                            # Update progress bar
+                            progress = min(int((elapsed / timeout) * 90), 90)
+                            audio_bar.progress(progress)
+                            
+                            # Log periodic status
+                            if check_count % 10 == 0:  # Every 5 seconds
+                                print(f"⏳ [{elapsed:.1f}s] Audio status: {status.get('status')} (check #{check_count})")
+                            
                             if status['status'] == 'completed':
-                                result_data = status.get('result', {})
-                                if result_data.get('success'):
-                                    audio_path = result_data.get('result')
-                                    break
+                                result = status.get('result', {})
+                                print(f"✅ Task completed. Result: {result}")
+                                
+                                if result.get('success'):
+                                    audio_path = result.get('result')
+                                    print(f"📁 Audio path: {audio_path}")
+                                    
+                                    if audio_path and os.path.exists(audio_path):
+                                        file_size = os.path.getsize(audio_path)
+                                        print(f"✅ Audio file verified: {audio_path} ({file_size} bytes)")
+                                        audio_bar.progress(100)
+                                        audio_status.success(f"✅ Audio generated: {os.path.basename(audio_path)} ({file_size} bytes)")
+                                        break
+                                    else:
+                                        error_msg = f"Audio file not found: {audio_path}"
+                                        print(f"❌ {error_msg}")
+                                        audio_status.error(f"❌ {error_msg}")
+                                        
+                                        # Debug: List files in output directory
+                                        output_dir = Config().OUTPUT_DIR / "audio"
+                                        if output_dir.exists():
+                                            files = list(output_dir.iterdir())
+                                            print(f"📂 Files in {output_dir}: {files}")
+                                            st.code(f"Files in audio directory: {files}")
+                                        
+                                        st.stop()
+                                else:
+                                    error = result.get('error', 'Unknown error')
+                                    print(f"❌ Audio generation failed: {error}")
+                                    audio_status.error(f"❌ Audio generation failed: {error}")
+                                    st.stop()
+                                    
                             elif status['status'] == 'failed':
-                                error_msg = status.get('result', {}).get('error', 'Unknown error')
-                                st.error(f"Audio Error: {error_msg}")
-                                if debug_mode:
-                                    st.code(str(status))
+                                error = status.get('result', {}).get('error', 'Unknown error')
+                                print(f"❌ Task failed: {error}")
+                                audio_status.error(f"❌ Audio generation failed: {error}")
+                                
+                                # Show full error details
+                                st.code(f"Error details: {status.get('result', {})}")
                                 st.stop()
                             
-                            time.sleep(1)
-                            prog_bar.progress(min(30, int((time.time() - start_wait))))
-
-                        if not audio_path or not os.path.exists(audio_path):
-                            st.error("Audio generation timed out.")
+                            elif status['status'] == 'not_found':
+                                print(f"❌ Task not found: {task_id}")
+                                audio_status.error(f"❌ Audio task not found: {task_id}")
+                                
+                                # Debug: Show all tasks
+                                stats = async_processor.get_queue_stats()
+                                print(f"📊 Queue stats: {stats}")
+                                st.code(f"Queue stats: {stats}")
+                                st.stop()
+                            
+                            elif status['status'] in ('queued', 'processing'):
+                                # Task is still running, just wait
+                                pass
+                            else:
+                                print(f"⚠️ Unknown status: {status}")
+                                
+                            time.sleep(0.5)
+                        
+                        if not audio_path:
+                            elapsed = time.time() - start_time
+                            error_msg = f"Audio generation timed out after {elapsed:.1f}s"
+                            print(f"⏰ {error_msg}")
+                            audio_status.error(f"⏰ {error_msg}")
+                            
+                            # Show final status
+                            final_status = async_processor.get_task_status(task_id)
+                            print(f"📊 Final status: {final_status}")
+                            st.code(f"Final task status: {final_status}")
                             st.stop()
 
-                        if debug_mode:
-                            st.success(f"✅ Audio generated: {audio_path}")
-                            st.audio(audio_path)
-
-                        # 4. Step 2: Video Generation
-                        status_box.info("🎬 Step 2/2: Lip-Syncing Video (This takes 1-2 minutes)...")
-                        prog_bar.progress(40)
+                        # Step 2: Generate video
+                        print("\n" + "-"*80)
+                        print("STEP 2: VIDEO GENERATION")
+                        print("-"*80)
+                        print(f"🎥 Input audio: {audio_path}")
+                        print(f"🎥 Avatar mode: {'auto' if auto_avatar else 'custom'}")
                         
-                        avatar_source = Config().AUTO_AVATARS.get(lang_code) if auto_avatar else custom_avatar
+                        video_status.info("🎥 Step 2/2: Generating video... This may take several minutes")
+                        video_bar = video_progress.progress(0)
                         
-                        final_video_path = generate_video(audio_path, avatar_source, lang_code, auto_avatar)
+                        avatar_input = Config().AUTO_AVATARS.get(lang_code) if auto_avatar else custom_avatar
+                        print(f"👤 Avatar input: {avatar_input}")
                         
-                        if final_video_path and os.path.exists(final_video_path):
-                            prog_bar.progress(100)
-                            status_box.success("✅ Broadcast Video Generated Successfully!")
-                            st.video(final_video_path)
+                        if not avatar_input:
+                            error_msg = "No avatar available"
+                            print(f"❌ {error_msg}")
+                            video_status.error(f"❌ {error_msg}")
+                            st.stop()
+                        
+                        # Verify avatar exists (for auto-generated)
+                        if auto_avatar and isinstance(avatar_input, str):
+                            if not os.path.exists(avatar_input):
+                                error_msg = f"Avatar file not found: {avatar_input}"
+                                print(f"❌ {error_msg}")
+                                video_status.error(f"❌ {error_msg}")
+                                st.stop()
+                            print(f"✅ Avatar file verified: {avatar_input}")
+                        
+                        video_start = time.time()
+                        video_path = generate_video(audio_path, avatar_input, lang_code, auto_avatar)
+                        video_elapsed = time.time() - video_start
+                        
+                        print(f"⏱️ Video generation took {video_elapsed:.1f}s")
+                        
+                        if video_path and os.path.exists(video_path):
+                            video_size = os.path.getsize(video_path)
+                            print(f"✅ Video generated: {video_path} ({video_size} bytes)")
                             
-                            with open(final_video_path, 'rb') as f:
+                            video_bar.progress(100)
+                            video_status.success(f"🎉 Video generated successfully! ({video_size} bytes)")
+                            
+                            # Display the video
+                            st.video(video_path)
+                            
+                            # Offer download
+                            with open(video_path, 'rb') as f:
                                 st.download_button(
-                                    "📥 Download News Broadcast",
-                                    f,
-                                    file_name=f"news_{lang_code}_{int(time.time())}.mp4",
+                                    label="📥 Download Video",
+                                    data=f,
+                                    file_name=os.path.basename(video_path),
                                     mime="video/mp4"
                                 )
                         else:
-                            st.error("Video rendering failed. Check logs for subprocess errors.")
+                            error_msg = f"Video generation failed - output: {video_path}"
+                            print(f"❌ {error_msg}")
+                            video_status.error(f"❌ {error_msg}")
+                            
+                            # Debug: Check outputs directory
+                            output_dir = Config().OUTPUT_DIR
+                            if output_dir.exists():
+                                files = list(output_dir.rglob("*"))
+                                print(f"📂 Files in outputs: {files}")
+                                st.code(f"Files in outputs directory: {files}")
 
-                    except Exception as ve:
-                        st.error(f"Video Generation Error: {str(ve)}")
-                        with st.expander("Technical Traceback"):
-                            st.code(traceback.format_exc())
+                    except Exception as e:
+                        print(f"\n{'='*80}")
+                        print(f"💥 VIDEO GENERATION ERROR")
+                        print(f"{'='*80}")
+                        print(f"Error: {e}")
+                        
+                        import traceback
+                        tb = traceback.format_exc()
+                        print(tb)
+                        
+                        st.error(f"❌ Video generation error: {str(e)}")
+                        
+                        # Show full traceback in expander
+                        with st.expander("🔍 Show detailed error"):
+                            st.code(tb)
 
         else:
             st.info(f"No {language} articles found for {category}. Try another category.")
@@ -291,6 +436,8 @@ def main():
     except Exception as e:
         st.error(f"Application Error: {str(e)}")
         st.info("Check your API keys in Space Secrets and internet connectivity.")
+        with st.expander("Technical Details"):
+            st.code(traceback.format_exc())
 
 if __name__ == "__main__":
     main()
