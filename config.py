@@ -54,16 +54,47 @@ class Config:
     MAX_TTS_LENGTH = 10000
 
     # ========================
-    # API Configuration
+    # API & LLM Configuration
     # ========================
     NEWS_API_KEY = os.environ.get('NEWS_API_KEY')
-    SUMMARIZATION_API = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-    HUGGINGFACE_API_KEY = os.environ.get('HUGGINGFACE_API_KEY')
     MAX_CONCURRENT_REQUESTS = 5
 
     # Headers to mimic a real browser and avoid 403 Forbidden errors
     REQUEST_HEADERS = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+
+    # --- LLM SETTINGS (NEW) ---
+    
+    # Primary LLM: Groq (RECOMMENDED - fastest & free tier available)
+    GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
+    GROQ_MODEL = 'llama-3.1-8b-instant'  # 750 tokens/sec, 14,400 req/day free
+    
+    # Alternative LLMs (if Groq fails)
+    TOGETHER_API_KEY = os.environ.get('TOGETHER_API_KEY')
+    CEREBRAS_API_KEY = os.environ.get('CEREBRAS_API_KEY')
+    
+    # Fallback: Keep Hugging Face for backward compatibility
+    HUGGINGFACE_API_KEY = os.environ.get('HUGGINGFACE_API_KEY')
+    SUMMARIZATION_API = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+    
+    # LLM Provider Selection (in order of preference)
+    LLM_PROVIDERS = [
+        'groq',        # Try Groq first (fastest)
+        'together',    # Try Together.ai second (good quality)
+        'cerebras',    # Try Cerebras third (very fast)
+        'huggingface'  # Fallback to HF (slowest but reliable)
+    ]
+    
+    # LLM Processing Settings
+    LLM_CONFIG = {
+        'temperature': 0.3,           # Lower = more consistent
+        'max_tokens': 1000,           # Max output length
+        'timeout': 10,                # Request timeout (seconds)
+        'retry_attempts': 2,          # Retry on failure
+        'summary_max_words': 150,     # Max words in summary
+        'add_ssml_english': True,     # Add SSML breaks for English
+        'add_ssml_urdu': False,       # gTTS doesn't support SSML
     }
 
     # ========================
@@ -210,10 +241,37 @@ class Config:
 
     @classmethod
     def validate_api_keys(cls) -> Dict[str, bool]:
+        """Validate News and basic fallback keys"""
         return {
             'news_api': bool(cls.NEWS_API_KEY),
             'huggingface_api': bool(cls.HUGGINGFACE_API_KEY)
         }
+    
+    @classmethod
+    def validate_llm_keys(cls) -> Dict[str, bool]:
+        """Check which LLM API keys are available"""
+        return {
+            'groq': bool(cls.GROQ_API_KEY),
+            'together': bool(cls.TOGETHER_API_KEY),
+            'cerebras': bool(cls.CEREBRAS_API_KEY),
+            'huggingface': bool(cls.HUGGINGFACE_API_KEY),
+        }
+
+    @classmethod
+    def get_available_llm(cls) -> Optional[str]:
+        """Return first available LLM provider"""
+        for provider in cls.LLM_PROVIDERS:
+            if provider == 'groq' and cls.GROQ_API_KEY:
+                return 'groq'
+            elif provider == 'together' and cls.TOGETHER_API_KEY:
+                return 'together'
+            elif provider == 'cerebras' and cls.CEREBRAS_API_KEY:
+                return 'cerebras'
+            elif provider == 'huggingface' and cls.HUGGINGFACE_API_KEY:
+                return 'huggingface'
+        
+        # No API keys found
+        return None
 
     @classmethod
     def validate_paths(cls) -> List[str]:
@@ -302,8 +360,17 @@ class Config:
                 logger.error(f"Missing critical files: {missing_files}")
                 return False
             
+            # Basic keys validation
             api_status = cls.validate_api_keys()
-            logger.info(f"API Status: {api_status}")
+            logger.info(f"News API Status: {api_status}")
+
+            # LLM Validation
+            active_llm = cls.get_available_llm()
+            if active_llm:
+                logger.info(f"Active LLM Provider: {active_llm.upper()}")
+            else:
+                logger.warning("No valid LLM API keys found. Text generation may fail.")
+
             return True
 
         except Exception as e:
